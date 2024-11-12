@@ -4,6 +4,7 @@ import aiohttp
 import aiofiles
 import os
 
+
 class DispatchLandParser:
     def __init__(self, url, token, start_page, page_count, cookies, concurrency_limit=3):
         self.url = url
@@ -20,7 +21,7 @@ class DispatchLandParser:
             'Pragma': 'no-cache',
             'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.0.1 Safari/605.1.15'
         }
-        self.semaphore = asyncio.Semaphore(concurrency_limit)  # Ограничение на количество параллельных задач
+        self.semaphore = asyncio.Semaphore(concurrency_limit)
 
     def get_pages_folder(self):
         return "pages"
@@ -41,7 +42,7 @@ class DispatchLandParser:
         return "customer_details"
 
     async def _post_request(self, session, endpoint, data):
-        async with self.semaphore:  # Используем семафор для ограничения одновременных задач
+        async with self.semaphore:
             try:
                 async with session.post(self.url + endpoint, headers=self.headers, cookies=self.cookies, json=data) as response:
                     if response.status == 200:
@@ -54,7 +55,7 @@ class DispatchLandParser:
                 return None
 
     async def _get_request(self, session, endpoint):
-        async with self.semaphore:  # Используем семафор для ограничения одновременных задач
+        async with self.semaphore:
             try:
                 async with session.get(self.url + endpoint, headers=self.headers, cookies=self.cookies) as response:
                     if response.status == 200:
@@ -73,27 +74,26 @@ class DispatchLandParser:
             await f.write(json.dumps(data, indent=4))
         print(f"Данные сохранены в {full_path}")
 
-    async def parse_pages(self):
+    async def parse_pages(self, session):
         folder_path = self.get_pages_folder()
-        async with aiohttp.ClientSession(connector=aiohttp.TCPConnector(ssl=False)) as session:
-            tasks = []
-            for page_number in range(self.start_page, self.start_page + self.page_count):
-                file_name = f'sp_loads_page_{page_number}.json'
-                full_path = os.path.join(folder_path, file_name)
+        tasks = []
+        for page_number in range(self.start_page, self.page_count + 1):
+            file_name = f'sp_loads_page_{page_number}.json'
+            full_path = os.path.join(folder_path, file_name)
 
-                if os.path.exists(full_path):
-                    print(f"Файл {file_name} уже существует, пропускаем запрос.")
-                    continue
+            if os.path.exists(full_path):
+                print(f"Файл {file_name} уже существует, пропускаем запрос.")
+                continue
 
-                data = {
-                    "page": page_number,
-                    "perPage": 50,
-                    "sortBy": {"lastDelivery": "desc"},
-                    "loadStatus": ["Completed"]
-                }
-                tasks.append(self._parse_page_task(session, data, file_name, folder_path))
+            data = {
+                "page": page_number,
+                "perPage": 50,
+                "sortBy": {"lastDelivery": "desc"},
+                "loadStatus": ["Completed"]
+            }
+            tasks.append(self._parse_page_task(session, data, file_name, folder_path))
 
-            await asyncio.gather(*tasks)
+        await asyncio.gather(*tasks)
 
     async def _parse_page_task(self, session, data, file_name, folder_path):
         json_data = await self._post_request(session, '/api/sp-loads', data)
@@ -101,16 +101,15 @@ class DispatchLandParser:
             print(f"Данные с страницы сохранены в {file_name}.")
             await self.save_json_to_file(json_data, file_name, folder_path)
 
-    async def fetch_load_details(self):
+    async def fetch_load_details(self, session):
         pages_folder = self.get_pages_folder()
         output_folder = self.get_load_details_folder()
-        async with aiohttp.ClientSession(connector=aiohttp.TCPConnector(ssl=False)) as session:
-            tasks = []
-            for file_name in os.listdir(pages_folder):
-                if file_name.endswith('.json'):
-                    tasks.append(self._fetch_load_task(session, file_name, pages_folder, output_folder))
+        tasks = []
+        for file_name in os.listdir(pages_folder):
+            if file_name.endswith('.json'):
+                tasks.append(self._fetch_load_task(session, file_name, pages_folder, output_folder))
 
-            await asyncio.gather(*tasks)
+        await asyncio.gather(*tasks)
 
     async def _fetch_load_task(self, session, file_name, pages_folder, output_folder):
         full_path = os.path.join(pages_folder, file_name)
@@ -132,16 +131,15 @@ class DispatchLandParser:
                 if load_details:
                     await self.save_json_to_file(load_details, output_file_name, output_folder)
 
-    async def fetch_travel_order_details(self):
+    async def fetch_travel_order_details(self, session):
         load_details_folder = self.get_load_details_folder()
         travel_order_folder = self.get_travel_order_folder()
-        async with aiohttp.ClientSession(connector=aiohttp.TCPConnector(ssl=False)) as session:
-            tasks = []
-            for file_name in os.listdir(load_details_folder):
-                if file_name.endswith('.json'):
-                    tasks.append(self._fetch_travel_order_task(session, file_name, load_details_folder, travel_order_folder))
+        tasks = []
+        for file_name in os.listdir(load_details_folder):
+            if file_name.endswith('.json'):
+                tasks.append(self._fetch_travel_order_task(session, file_name, load_details_folder, travel_order_folder))
 
-            await asyncio.gather(*tasks)
+        await asyncio.gather(*tasks)
 
     async def _fetch_travel_order_task(self, session, file_name, load_details_folder, travel_order_folder):
         full_path = os.path.join(load_details_folder, file_name)
@@ -164,16 +162,15 @@ class DispatchLandParser:
                 if travel_order_details:
                     await self.save_json_to_file(travel_order_details, output_file_name, travel_order_folder)
 
-    async def fetch_truck_details(self):
+    async def fetch_truck_details(self, session):
         load_details_folder = self.get_load_details_folder()
         truck_folder = self.get_truck_folder()
-        async with aiohttp.ClientSession(connector=aiohttp.TCPConnector(ssl=False)) as session:
-            tasks = []
-            for file_name in os.listdir(load_details_folder):
-                if file_name.endswith('.json'):
-                    tasks.append(self._fetch_truck_task(session, file_name, load_details_folder, truck_folder))
+        tasks = []
+        for file_name in os.listdir(load_details_folder):
+            if file_name.endswith('.json'):
+                tasks.append(self._fetch_truck_task(session, file_name, load_details_folder, truck_folder))
 
-            await asyncio.gather(*tasks)
+        await asyncio.gather(*tasks)
 
     async def _fetch_truck_task(self, session, file_name, load_details_folder, truck_folder):
         full_path = os.path.join(load_details_folder, file_name)
@@ -197,16 +194,15 @@ class DispatchLandParser:
                 if truck_details:
                     await self.save_json_to_file(truck_details, output_file_name, truck_folder)
 
-    async def fetch_owner_details(self):
+    async def fetch_owner_details(self, session):
         load_details_folder = self.get_load_details_folder()
         owner_folder = self.get_owner_folder()
-        async with aiohttp.ClientSession(connector=aiohttp.TCPConnector(ssl=False)) as session:
-            tasks = []
-            for file_name in os.listdir(load_details_folder):
-                if file_name.endswith('.json'):
-                    tasks.append(self._fetch_owner_task(session, file_name, load_details_folder, owner_folder))
+        tasks = []
+        for file_name in os.listdir(load_details_folder):
+            if file_name.endswith('.json'):
+                tasks.append(self._fetch_owner_task(session, file_name, load_details_folder, owner_folder))
 
-            await asyncio.gather(*tasks)
+        await asyncio.gather(*tasks)
 
     async def _fetch_owner_task(self, session, file_name, load_details_folder, owner_folder):
         full_path = os.path.join(load_details_folder, file_name)
@@ -227,16 +223,15 @@ class DispatchLandParser:
             if owner_details:
                 await self.save_json_to_file(owner_details, output_file_name, owner_folder)
 
-    async def fetch_customer_details(self):
+    async def fetch_customer_details(self, session):
         load_details_folder = self.get_load_details_folder()
         customer_folder = self.get_customer_folder()
-        async with aiohttp.ClientSession(connector=aiohttp.TCPConnector(ssl=False)) as session:
-            tasks = []
-            for file_name in os.listdir(load_details_folder):
-                if file_name.endswith('.json'):
-                    tasks.append(self._fetch_customer_task(session, file_name, load_details_folder, customer_folder))
+        tasks = []
+        for file_name in os.listdir(load_details_folder):
+            if file_name.endswith('.json'):
+                tasks.append(self._fetch_customer_task(session, file_name, load_details_folder, customer_folder))
 
-            await asyncio.gather(*tasks)
+        await asyncio.gather(*tasks)
 
     async def _fetch_customer_task(self, session, file_name, load_details_folder, customer_folder):
         full_path = os.path.join(load_details_folder, file_name)
@@ -257,6 +252,15 @@ class DispatchLandParser:
             if customer_details:
                 await self.save_json_to_file(customer_details, output_file_name, customer_folder)
 
+    async def run_all_tasks(self):
+        async with aiohttp.ClientSession(connector=aiohttp.TCPConnector(ssl=False)) as session:
+            await self.parse_pages(session)
+            await self.fetch_load_details(session)
+            await self.fetch_travel_order_details(session)
+            await self.fetch_truck_details(session)
+            await self.fetch_owner_details(session)
+            await self.fetch_customer_details(session)
+
 
 if __name__ == "__main__":
     url = "https://ot.dispatchland.com"
@@ -269,12 +273,7 @@ if __name__ == "__main__":
         "connect.sid": "s%3AULRvnTu11bLW8hgrBMyBnqUdhf3iJWVo.64N0Hkn9OLwhO7i6iYryyy1pfpERdixaK4KTQgZaNcY",
         "pechenka": "OTJhMDIxM2YwMjk2ODliMGRjODliZjE0NmUxNTJkNzljNjFlNzg2NmY5M2EwNjczMTAwNzU1NzM4ZDI3ODVjMg"
     }
-    concurrency_limit = 3
+    concurrency_limit = 1
 
-    parser = DispatchLandParser(url, token, start_page, page_count, cookies, concurrency_limit)
-    asyncio.run(parser.parse_pages())
-    asyncio.run(parser.fetch_load_details())
-    asyncio.run(parser.fetch_travel_order_details())
-    asyncio.run(parser.fetch_truck_details())
-    asyncio.run(parser.fetch_owner_details())
-    asyncio.run(parser.fetch_customer_details())
+    parser = DispatchLandParser(url, token, start_page, page_count, cookies)
+    asyncio.run(parser.run_all_tasks())
