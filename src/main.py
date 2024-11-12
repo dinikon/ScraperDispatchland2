@@ -70,9 +70,13 @@ class DispatchLandParser:
     async def save_json_to_file(self, data, file_name, folder_path):
         os.makedirs(folder_path, exist_ok=True)
         full_path = os.path.join(folder_path, file_name)
-        async with aiofiles.open(full_path, 'w') as f:
-            await f.write(json.dumps(data, indent=4))
-        print(f"Данные сохранены в {full_path}")
+        # Проверка перед записью данных в файл внутри семафора
+        if not os.path.exists(full_path):
+            async with aiofiles.open(full_path, 'w') as f:
+                await f.write(json.dumps(data, indent=4))
+            print(f"Данные сохранены в {full_path}")
+        else:
+            print(f"Файл {file_name} уже существует, пропускаем сохранение.")
 
     async def parse_pages(self, session):
         folder_path = self.get_pages_folder()
@@ -98,7 +102,6 @@ class DispatchLandParser:
     async def _parse_page_task(self, session, data, file_name, folder_path):
         json_data = await self._post_request(session, '/api/sp-loads', data)
         if json_data:
-            print(f"Данные с страницы сохранены в {file_name}.")
             await self.save_json_to_file(json_data, file_name, folder_path)
 
     async def fetch_load_details(self, session):
@@ -275,5 +278,5 @@ if __name__ == "__main__":
     }
     concurrency_limit = 1
 
-    parser = DispatchLandParser(url, token, start_page, page_count, cookies)
+    parser = DispatchLandParser(url, token, start_page, page_count, cookies, concurrency_limit)
     asyncio.run(parser.run_all_tasks())
