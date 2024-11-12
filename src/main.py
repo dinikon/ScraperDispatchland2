@@ -3,7 +3,12 @@ import asyncio
 import aiohttp
 import aiofiles
 import os
+import logging
+import sys
 
+# Настройка логгера
+logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
+logger = logging.getLogger(__name__)
 
 class DispatchLandParser:
     def __init__(self, url, token, start_page, page_count, cookies, concurrency_limit=3):
@@ -41,42 +46,52 @@ class DispatchLandParser:
     def get_customer_folder(self):
         return "customer_details"
 
+    # Проверка статуса ответа и остановка при критических ошибках
+    async def _check_response_status(self, response):
+        if response.status >= 500:
+            logger.error(f"Критическая ошибка сервера {response.status}: {response.reason}")
+            sys.exit(f"Серверная ошибка {response.status}. Парсер остановлен.")
+        elif response.status in [401, 403]:
+            logger.error(f"Ошибка авторизации {response.status}: {response.reason}")
+            sys.exit(f"Ошибка авторизации {response.status}. Парсер остановлен.")
+        elif response.status != 200:
+            logger.warning(f"Неуспешный статус ответа {response.status}: {response.reason}")
+
     async def _post_request(self, session, endpoint, data):
         async with self.semaphore:
             try:
                 async with session.post(self.url + endpoint, headers=self.headers, cookies=self.cookies, json=data) as response:
+                    await self._check_response_status(response)
                     if response.status == 200:
+                        logger.info(f"POST запрос к {endpoint} успешен.")
                         return await response.json()
-                    else:
-                        print(f"Ошибка запроса: {response.status}")
-                        return None
+                    return None
             except Exception as e:
-                print(f"Ошибка при выполнении запроса: {e}")
+                logger.exception(f"Ошибка при выполнении POST запроса к {endpoint}: {e}")
                 return None
 
     async def _get_request(self, session, endpoint):
         async with self.semaphore:
             try:
                 async with session.get(self.url + endpoint, headers=self.headers, cookies=self.cookies) as response:
+                    await self._check_response_status(response)
                     if response.status == 200:
+                        logger.info(f"GET запрос к {endpoint} успешен.")
                         return await response.json()
-                    else:
-                        print(f"Ошибка запроса GET: {response.status}")
-                        return None
+                    return None
             except Exception as e:
-                print(f"Ошибка при выполнении GET-запроса: {e}")
+                logger.exception(f"Ошибка при выполнении GET запроса к {endpoint}: {e}")
                 return None
 
     async def save_json_to_file(self, data, file_name, folder_path):
         os.makedirs(folder_path, exist_ok=True)
         full_path = os.path.join(folder_path, file_name)
-        # Проверка перед записью данных в файл внутри семафора
         if not os.path.exists(full_path):
             async with aiofiles.open(full_path, 'w') as f:
                 await f.write(json.dumps(data, indent=4))
-            print(f"Данные сохранены в {full_path}")
+            logger.info(f"Данные сохранены в {full_path}")
         else:
-            print(f"Файл {file_name} уже существует, пропускаем сохранение.")
+            logger.info(f"Файл {file_name} уже существует, пропускаем сохранение.")
 
     async def parse_pages(self, session):
         folder_path = self.get_pages_folder()
@@ -86,7 +101,7 @@ class DispatchLandParser:
             full_path = os.path.join(folder_path, file_name)
 
             if os.path.exists(full_path):
-                print(f"Файл {file_name} уже существует, пропускаем запрос.")
+                logger.info(f"Файл {file_name} уже существует, пропускаем запрос.")
                 continue
 
             data = {
@@ -126,7 +141,7 @@ class DispatchLandParser:
                 full_output_path = os.path.join(output_folder, output_file_name)
 
                 if os.path.exists(full_output_path):
-                    print(f"Файл {output_file_name} уже существует, пропускаем запрос.")
+                    logger.info(f"Файл {output_file_name} уже существует, пропускаем запрос.")
                     continue
 
                 endpoint = f'/api/sp-loads/{load_number}'
@@ -157,7 +172,7 @@ class DispatchLandParser:
                 full_output_path = os.path.join(travel_order_folder, output_file_name)
 
                 if os.path.exists(full_output_path):
-                    print(f"Файл {output_file_name} уже существует, пропускаем запрос.")
+                    logger.info(f"Файл {output_file_name} уже существует, пропускаем запрос.")
                     continue
 
                 endpoint = f'/api/travel-order/{travel_order_number}'
@@ -189,7 +204,7 @@ class DispatchLandParser:
                 full_output_path = os.path.join(truck_folder, output_file_name)
 
                 if os.path.exists(full_output_path):
-                    print(f"Файл {output_file_name} уже существует, пропускаем запрос.")
+                    logger.info(f"Файл {output_file_name} уже существует, пропускаем запрос.")
                     return
 
                 endpoint = f'/api/trucks/search/{truck_number}'
@@ -218,7 +233,7 @@ class DispatchLandParser:
             full_output_path = os.path.join(owner_folder, output_file_name)
 
             if os.path.exists(full_output_path):
-                print(f"Файл {output_file_name} уже существует, пропускаем запрос.")
+                logger.info(f"Файл {output_file_name} уже существует, пропускаем запрос.")
                 return
 
             endpoint = f'/api/owners/{owner_id}'
@@ -247,7 +262,7 @@ class DispatchLandParser:
             full_output_path = os.path.join(customer_folder, output_file_name)
 
             if os.path.exists(full_output_path):
-                print(f"Файл {output_file_name} уже существует, пропускаем запрос.")
+                logger.info(f"Файл {output_file_name} уже существует, пропускаем запрос.")
                 return
 
             endpoint = f'/api/customers/{customer_id}'
@@ -257,19 +272,36 @@ class DispatchLandParser:
 
     async def run_all_tasks(self):
         async with aiohttp.ClientSession(connector=aiohttp.TCPConnector(ssl=False)) as session:
+            logger.info("Начало парсинга страниц.")
             await self.parse_pages(session)
+            logger.info("Парсинг страниц завершен.")
+
+            logger.info("Начало загрузки деталей грузов.")
             await self.fetch_load_details(session)
+            logger.info("Загрузка деталей грузов завершена.")
+
+            logger.info("Начало загрузки деталей travel orders.")
             await self.fetch_travel_order_details(session)
+            logger.info("Загрузка деталей travel orders завершена.")
+
+            logger.info("Начало загрузки деталей trucks.")
             await self.fetch_truck_details(session)
+            logger.info("Загрузка деталей trucks завершена.")
+
+            logger.info("Начало загрузки деталей owners.")
             await self.fetch_owner_details(session)
+            logger.info("Загрузка деталей owners завершена.")
+
+            logger.info("Начало загрузки деталей customers.")
             await self.fetch_customer_details(session)
+            logger.info("Загрузка деталей customers завершена.")
 
 
 if __name__ == "__main__":
     url = "https://ot.dispatchland.com"
     token = "OTJhMDIxM2YwMjk2ODliMGRjODliZjE0NmUxNTJkNzljNjFlNzg2NmY5M2EwNjczMTAwNzU1NzM4ZDI3ODVjMg"
     start_page = 1  # Начальная страница
-    page_count = 3  # Количество страниц для обработки
+    page_count = 4  # Количество страниц для обработки
     cookies = {
         "AWSALB": "78DX7XAFPPlhDH84XmI5DpyiBwoa9HaDXS6pac5Eywlx/9KVNWynJ2/L8yeQNnYLOACRT102+DCuhIbmdiYUoHuIg6m3j0UdUGi47CYb/Moss6pnAKn1aVkXNw2T",
         "AWSALBCORS": "78DX7XAFPPlhDH84XmI5DpyiBwoa9HaDXS6pac5Eywlx/9KVNWynJ2/L8yeQNnYLOACRT102+DCuhIbmdiYUoHuIg6m3j0UdUGi47CYb/Moss6pnAKn1aVkXNw2T",
