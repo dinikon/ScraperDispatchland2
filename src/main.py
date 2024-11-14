@@ -50,7 +50,8 @@ class DispatchLandParser:
     async def _check_response_status(self, response):
         if response.status >= 500:
             logger.error(f"Критическая ошибка сервера {response.status}: {response.reason}")
-            sys.exit(f"Серверная ошибка {response.status}. Парсер остановлен.")
+            await asyncio.sleep(30)
+            # sys.exit(f"Серверная ошибка {response.status}. Парсер остановлен.")
         elif response.status in [401, 403]:
             logger.error(f"Ошибка авторизации {response.status}: {response.reason}")
             sys.exit(f"Ошибка авторизации {response.status}. Парсер остановлен.")
@@ -106,9 +107,14 @@ class DispatchLandParser:
 
             data = {
                 "page": page_number,
-                "perPage": 50,
-                "sortBy": {"lastDelivery": "desc"},
-                "loadStatus": ["Completed"]
+                "perPage": 500,
+                "sortBy": {
+                    "lastDelivery": "asc"
+                },
+                # "truckNumber": "MCOT2557",
+                "loadStatus": [
+                    "Completed"
+                ]
             }
             tasks.append(self._parse_page_task(session, data, file_name, folder_path))
 
@@ -150,125 +156,69 @@ class DispatchLandParser:
                     await self.save_json_to_file(load_details, output_file_name, output_folder)
 
     async def fetch_travel_order_details(self, session):
-        load_details_folder = self.get_load_details_folder()
+        pages_folder = self.get_pages_folder()
         travel_order_folder = self.get_travel_order_folder()
         tasks = []
-        for file_name in os.listdir(load_details_folder):
+        for file_name in os.listdir(pages_folder):
             if file_name.endswith('.json'):
-                tasks.append(self._fetch_travel_order_task(session, file_name, load_details_folder, travel_order_folder))
+                tasks.append(self._fetch_travel_order_task(session, file_name, pages_folder, travel_order_folder))
 
         await asyncio.gather(*tasks)
 
-    async def _fetch_travel_order_task(self, session, file_name, load_details_folder, travel_order_folder):
-        full_path = os.path.join(load_details_folder, file_name)
+    async def _fetch_travel_order_task(self, session, file_name, pages_folder, travel_order_folder):
+        full_path = os.path.join(pages_folder, file_name)
         async with aiofiles.open(full_path, 'r') as f:
-            load_data = json.loads(await f.read())
+            data = json.loads(await f.read())
 
-        travel_orders = load_data.get("travelOrders", [])
-        for travel_order in travel_orders:
-            travel_order_number = travel_order.get("number")
-            if travel_order_number:
-                output_file_name = f'travel_order_{travel_order_number}.json'
-                full_output_path = os.path.join(travel_order_folder, output_file_name)
+        for item in data:
+            travel_orders = item.get("travelOrders", [])
+            for travel_order in travel_orders:
+                travel_order_number = travel_order.get("number", [])
+                if travel_order_number:
+                    output_file_name = f'travel_order_{travel_order_number}.json'
+                    full_output_path = os.path.join(travel_order_folder, output_file_name)
 
-                if os.path.exists(full_output_path):
-                    logger.info(f"Файл {output_file_name} уже существует, пропускаем запрос.")
-                    continue
+                    if os.path.exists(full_output_path):
+                        logger.info(f"Файл {output_file_name} уже существует, пропускаем запрос.")
+                        continue
 
-                endpoint = f'/api/travel-order/{travel_order_number}'
-                travel_order_details = await self._get_request(session, endpoint)
-                if travel_order_details:
-                    await self.save_json_to_file(travel_order_details, output_file_name, travel_order_folder)
+                    endpoint = f'/api/travel-order/{travel_order_number}'
+                    travel_order_details = await self._get_request(session, endpoint)
+                    if travel_order_details:
+                        await self.save_json_to_file(travel_order_details, output_file_name, travel_order_folder)
 
     async def fetch_truck_details(self, session):
-        load_details_folder = self.get_load_details_folder()
+        pages_folder = self.get_pages_folder()
         truck_folder = self.get_truck_folder()
         tasks = []
-        for file_name in os.listdir(load_details_folder):
+        for file_name in os.listdir(pages_folder):
             if file_name.endswith('.json'):
-                tasks.append(self._fetch_truck_task(session, file_name, load_details_folder, truck_folder))
+                tasks.append(self._fetch_truck_task(session, file_name, pages_folder, truck_folder))
 
         await asyncio.gather(*tasks)
 
     async def _fetch_truck_task(self, session, file_name, load_details_folder, truck_folder):
         full_path = os.path.join(load_details_folder, file_name)
         async with aiofiles.open(full_path, 'r') as f:
-            load_data = json.loads(await f.read())
+            data = json.loads(await f.read())
 
-        travel_orders = load_data.get("travelOrders", [])
-        if travel_orders:
-            truck = travel_orders[0].get("truck")
-            if truck and truck.get("number"):
-                truck_number = truck["number"]
-                output_file_name = f'truck_{truck_number}.json'
-                full_output_path = os.path.join(truck_folder, output_file_name)
+        for item in data:
+            travel_orders = item.get("travelOrders", [])
+            if travel_orders:
+                truck = travel_orders[0].get("truck")
+                if truck and truck.get("number"):
+                    truck_number = truck["number"]
+                    output_file_name = f'truck_{truck_number}.json'
+                    full_output_path = os.path.join(truck_folder, output_file_name)
 
-                if os.path.exists(full_output_path):
-                    logger.info(f"Файл {output_file_name} уже существует, пропускаем запрос.")
-                    return
+                    if os.path.exists(full_output_path):
+                        logger.info(f"Файл {output_file_name} уже существует, пропускаем запрос.")
+                        return
 
-                endpoint = f'/api/trucks/search/{truck_number}'
-                truck_details = await self._get_request(session, endpoint)
-                if truck_details:
-                    await self.save_json_to_file(truck_details, output_file_name, truck_folder)
-
-    async def fetch_owner_details(self, session):
-        load_details_folder = self.get_load_details_folder()
-        owner_folder = self.get_owner_folder()
-        tasks = []
-        for file_name in os.listdir(load_details_folder):
-            if file_name.endswith('.json'):
-                tasks.append(self._fetch_owner_task(session, file_name, load_details_folder, owner_folder))
-
-        await asyncio.gather(*tasks)
-
-    async def _fetch_owner_task(self, session, file_name, load_details_folder, owner_folder):
-        full_path = os.path.join(load_details_folder, file_name)
-        async with aiofiles.open(full_path, 'r') as f:
-            load_data = json.loads(await f.read())
-
-        owner_id = load_data.get("bookedByDispatcher", {}).get("id")
-        if owner_id:
-            output_file_name = f'owner_{owner_id}.json'
-            full_output_path = os.path.join(owner_folder, output_file_name)
-
-            if os.path.exists(full_output_path):
-                logger.info(f"Файл {output_file_name} уже существует, пропускаем запрос.")
-                return
-
-            endpoint = f'/api/owners/{owner_id}'
-            owner_details = await self._get_request(session, endpoint)
-            if owner_details:
-                await self.save_json_to_file(owner_details, output_file_name, owner_folder)
-
-    async def fetch_customer_details(self, session):
-        load_details_folder = self.get_load_details_folder()
-        customer_folder = self.get_customer_folder()
-        tasks = []
-        for file_name in os.listdir(load_details_folder):
-            if file_name.endswith('.json'):
-                tasks.append(self._fetch_customer_task(session, file_name, load_details_folder, customer_folder))
-
-        await asyncio.gather(*tasks)
-
-    async def _fetch_customer_task(self, session, file_name, load_details_folder, customer_folder):
-        full_path = os.path.join(load_details_folder, file_name)
-        async with aiofiles.open(full_path, 'r') as f:
-            load_data = json.loads(await f.read())
-
-        customer_id = load_data.get("bookedWithCustomer", {}).get("id")
-        if customer_id:
-            output_file_name = f'customer_{customer_id}.json'
-            full_output_path = os.path.join(customer_folder, output_file_name)
-
-            if os.path.exists(full_output_path):
-                logger.info(f"Файл {output_file_name} уже существует, пропускаем запрос.")
-                return
-
-            endpoint = f'/api/customers/{customer_id}'
-            customer_details = await self._get_request(session, endpoint)
-            if customer_details:
-                await self.save_json_to_file(customer_details, output_file_name, customer_folder)
+                    endpoint = f'/api/trucks/search/{truck_number}'
+                    truck_details = await self._get_request(session, endpoint)
+                    if truck_details:
+                        await self.save_json_to_file(truck_details, output_file_name, truck_folder)
 
     async def run_all_tasks(self):
         async with aiohttp.ClientSession(connector=aiohttp.TCPConnector(ssl=False)) as session:
@@ -287,14 +237,6 @@ class DispatchLandParser:
             logger.info("Начало загрузки деталей trucks.")
             await self.fetch_truck_details(session)
             logger.info("Загрузка деталей trucks завершена.")
-
-            logger.info("Начало загрузки деталей owners.")
-            await self.fetch_owner_details(session)
-            logger.info("Загрузка деталей owners завершена.")
-
-            logger.info("Начало загрузки деталей customers.")
-            await self.fetch_customer_details(session)
-            logger.info("Загрузка деталей customers завершена.")
 
 
 if __name__ == "__main__":
